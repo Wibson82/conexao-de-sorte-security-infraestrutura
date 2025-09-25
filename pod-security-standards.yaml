@@ -1,0 +1,372 @@
+# ============================================================================
+# 🛡️ POD SECURITY STANDARDS - CONEXÃO DE SORTE SECURITY INFRASTRUCTURE
+# ============================================================================
+# Pod Security Standards e Security Contexts para todos os microsserviços
+# seguindo padrão: conexao-de-sorte-backend-{nome}
+# ============================================================================
+
+# ========================================
+# 🔒 NAMESPACE SECURITY LABELS
+# ========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    security.conexao-de-sorte.com/level: high
+
+---
+# ========================================
+# 🛡️ POD SECURITY POLICY (LEGACY SUPPORT)
+# ========================================
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: conexao-de-sorte-restricted-psp
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  runAsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1001
+        max: 65535
+  seLinux:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1001
+        max: 65535
+  readOnlyRootFilesystem: false
+  seccompProfile:
+    type: RuntimeDefault
+
+---
+# ========================================
+# 🔐 SECURITY CONTEXT CONSTRAINTS
+# ========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conexao-de-sorte-security-contexts
+  namespace: default
+data:
+  # Security Context padrão para todos os microsserviços
+  default-security-context.yaml: |
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+      runAsGroup: 1001
+      fsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault
+      capabilities:
+        drop:
+        - ALL
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+      
+  # Security Context para containers com necessidades especiais
+  privileged-security-context.yaml: |
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+      runAsGroup: 1001
+      fsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault
+      capabilities:
+        drop:
+        - ALL
+        add:
+        - NET_BIND_SERVICE  # Para bind em portas < 1024 se necessário
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+
+---
+# ========================================
+# 🔍 ADMISSION CONTROLLER CONFIGURATION
+# ========================================
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionWebhook
+metadata:
+  name: conexao-de-sorte-security-validator
+webhooks:
+- name: security.conexao-de-sorte.com
+  clientConfig:
+    service:
+      name: conexao-de-sorte-security-webhook
+      namespace: default
+      path: "/validate"
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]
+  admissionReviewVersions: ["v1", "v1beta1"]
+  sideEffects: None
+  failurePolicy: Fail
+
+---
+# ========================================
+# 🛡️ RESOURCE QUOTAS E LIMITS
+# ========================================
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: conexao-de-sorte-resource-quota
+  namespace: default
+spec:
+  hard:
+    # Limites de recursos computacionais
+    requests.cpu: "10"
+    requests.memory: 20Gi
+    limits.cpu: "20"
+    limits.memory: 40Gi
+    
+    # Limites de objetos
+    pods: "50"
+    services: "20"
+    secrets: "30"
+    configmaps: "30"
+    persistentvolumeclaims: "10"
+    
+    # Limites de storage
+    requests.storage: 100Gi
+
+---
+# ========================================
+# 📊 LIMIT RANGES
+# ========================================
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: conexao-de-sorte-limit-range
+  namespace: default
+spec:
+  limits:
+  # Limites para containers
+  - type: Container
+    default:
+      cpu: "1000m"
+      memory: "1Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "128Mi"
+    max:
+      cpu: "2000m"
+      memory: "2Gi"
+    min:
+      cpu: "50m"
+      memory: "64Mi"
+      
+  # Limites para pods
+  - type: Pod
+    max:
+      cpu: "4000m"
+      memory: "4Gi"
+    min:
+      cpu: "100m"
+      memory: "128Mi"
+      
+  # Limites para PVCs
+  - type: PersistentVolumeClaim
+    max:
+      storage: 10Gi
+    min:
+      storage: 1Gi
+
+---
+# ========================================
+# 🔐 SERVICE ACCOUNTS COM RBAC
+# ========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: conexao-de-sorte-backend-autenticacao-sa
+  namespace: default
+  labels:
+    app.kubernetes.io/name: conexao-de-sorte-backend-autenticacao
+    app.kubernetes.io/part-of: conexao-de-sorte
+automountServiceAccountToken: false
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: conexao-de-sorte-backend-financeiro-sa
+  namespace: default
+  labels:
+    app.kubernetes.io/name: conexao-de-sorte-backend-financeiro
+    app.kubernetes.io/part-of: conexao-de-sorte
+automountServiceAccountToken: false
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: conexao-de-sorte-backend-gateway-sa
+  namespace: default
+  labels:
+    app.kubernetes.io/name: conexao-de-sorte-backend-gateway
+    app.kubernetes.io/part-of: conexao-de-sorte
+automountServiceAccountToken: true  # Gateway precisa de acesso à API
+
+---
+# ========================================
+# 🔑 RBAC ROLES E BINDINGS
+# ========================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: conexao-de-sorte-backend-gateway-role
+  namespace: default
+rules:
+# Permissões mínimas para o Gateway
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: conexao-de-sorte-backend-gateway-binding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: conexao-de-sorte-backend-gateway-sa
+  namespace: default
+roleRef:
+  kind: Role
+  name: conexao-de-sorte-backend-gateway-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ========================================
+# 🛡️ OBSERVABILIDADE RBAC
+# ========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: conexao-de-sorte-backend-observabilidade-sa
+  namespace: default
+  labels:
+    app.kubernetes.io/name: conexao-de-sorte-backend-observabilidade
+    app.kubernetes.io/part-of: conexao-de-sorte
+automountServiceAccountToken: true
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: conexao-de-sorte-backend-observabilidade-role
+  namespace: default
+rules:
+# Permissões para coleta de métricas
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: conexao-de-sorte-backend-observabilidade-binding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: conexao-de-sorte-backend-observabilidade-sa
+  namespace: default
+roleRef:
+  kind: Role
+  name: conexao-de-sorte-backend-observabilidade-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ========================================
+# 🔒 SECRETS MANAGEMENT RBAC
+# ========================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: conexao-de-sorte-secrets-reader
+  namespace: default
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: 
+  - "conexao-de-sorte-database-credentials"
+  - "conexao-de-sorte-redis-credentials"
+  - "conexao-de-sorte-jwt-secret"
+  - "conexao-de-sorte-encryption-key"
+
+---
+# ========================================
+# 🚨 SECURITY MONITORING
+# ========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conexao-de-sorte-security-monitoring
+  namespace: default
+data:
+  falco-rules.yaml: |
+    # Regras customizadas do Falco para Conexão de Sorte
+    - rule: Conexao de Sorte Unauthorized Process
+      desc: Detect unauthorized processes in Conexao de Sorte containers
+      condition: >
+        spawned_process and
+        container and
+        k8s.ns.name = "default" and
+        k8s.pod.label["app.kubernetes.io/part-of"] = "conexao-de-sorte" and
+        not proc.name in (java, sh, bash, curl, wget)
+      output: >
+        Unauthorized process in Conexao de Sorte container
+        (user=%user.name command=%proc.cmdline container=%container.name
+        pod=%k8s.pod.name ns=%k8s.ns.name)
+      priority: WARNING
+      
+    - rule: Conexao de Sorte Sensitive File Access
+      desc: Detect access to sensitive files in Conexao de Sorte
+      condition: >
+        open_read and
+        container and
+        k8s.ns.name = "default" and
+        k8s.pod.label["app.kubernetes.io/part-of"] = "conexao-de-sorte" and
+        (fd.name contains "/etc/passwd" or
+         fd.name contains "/etc/shadow" or
+         fd.name contains "/run/secrets")
+      output: >
+        Sensitive file access in Conexao de Sorte
+        (file=%fd.name user=%user.name container=%container.name
+        pod=%k8s.pod.name ns=%k8s.ns.name)
+      priority: HIGH

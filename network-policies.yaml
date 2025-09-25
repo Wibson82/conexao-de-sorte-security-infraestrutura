@@ -1,0 +1,360 @@
+# ============================================================================
+# 🛡️ NETWORK POLICIES - CONEXÃO DE SORTE SECURITY INFRASTRUCTURE
+# ============================================================================
+# Políticas de rede para isolamento e segurança entre microsserviços
+# seguindo padrão: conexao-de-sorte-backend-{nome}
+# ============================================================================
+
+# ========================================
+# 🚫 DENY ALL - POLÍTICA PADRÃO
+# ========================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: conexao-de-sorte-deny-all
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# ========================================
+# 🔐 AUTENTICAÇÃO - NETWORK POLICY
+# ========================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: conexao-de-sorte-backend-autenticacao-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: conexao-de-sorte-backend-autenticacao
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Permitir tráfego do Gateway
+  - from:
+    - podSelector:
+        matchLabels:
+          app: conexao-de-sorte-backend-gateway
+    ports:
+    - protocol: TCP
+      port: 8081
+  # Permitir tráfego do Istio Ingress Gateway
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+      podSelector:
+        matchLabels:
+          app: istio-ingressgateway
+    ports:
+    - protocol: TCP
+      port: 8081
+  # Permitir health checks
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 8081
+  egress:
+  # Permitir acesso ao MySQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: conexao-mysql
+    ports:
+    - protocol: TCP
+      port: 3306
+  # Permitir acesso ao Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: conexao-redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Permitir DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Permitir HTTPS externo (Azure Key Vault)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+# ========================================
+# 💰 FINANCEIRO - NETWORK POLICY
+# ========================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: conexao-de-sorte-backend-financeiro-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: conexao-de-sorte-backend-financeiro
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Apenas Gateway e Autenticação podem acessar
+  - from:
+    - podSelector:
+        matchLabels:
+          app: conexao-de-sorte-backend-gateway
+    - podSelector:
+        matchLabels:
+          app: conexao-de-sorte-backend-autenticacao
+    ports:
+    - protocol: TCP
+      port: 8082
+  egress:
+  # Acesso restrito apenas aos recursos necessários
+  - to:
+    - podSelector:
+        matchLabels:
+          app: conexao-mysql
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - podSelector:
+        matchLabels:
+          app: conexao-redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # HTTPS externo para APIs bancárias
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+# ========================================
+# 💬 BATE-PAPO - NETWORK POLICY
+# ========================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: conexao-de-sorte-backend-batepapo-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: conexao-de-sorte-backend-batepapo
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Permitir tráfego do Gateway e outros microsserviços
+  - from:
+    - podSelector:
+        matchLabels:
+          app: conexao-de-sorte-backend-gateway
+    - podSelector:
+        matchLabels:
+          app: conexao-de-sorte-backend-notificacoes
+    ports:
+    - protocol: TCP
+      port: 8083
+  egress:
+  # Acesso aos recursos de dados
+  - to:
+    - podSelector:
+        matchLabels:
+          app: conexao-mysql
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - podSelector:
+        matchLabels:
+          app: conexao-redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Comunicação com Notificações
+  - to:
+    - podSelector:
+        matchLabels:
+          app: conexao-de-sorte-backend-notificacoes
+    ports:
+    - protocol: TCP
+      port: 8084
+  # DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# ========================================
+# 🌐 GATEWAY - NETWORK POLICY
+# ========================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: conexao-de-sorte-backend-gateway-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: conexao-de-sorte-backend-gateway
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Permitir tráfego externo via Istio Ingress Gateway
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+      podSelector:
+        matchLabels:
+          app: istio-ingressgateway
+    ports:
+    - protocol: TCP
+      port: 8086
+  # Permitir health checks
+  - from: []
+    ports:
+    - protocol: TCP
+      port: 8081
+  egress:
+  # Permitir comunicação com todos os microsserviços
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: conexao-de-sorte
+    ports:
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 8082
+    - protocol: TCP
+      port: 8083
+    - protocol: TCP
+      port: 8084
+    - protocol: TCP
+      port: 8085
+    - protocol: TCP
+      port: 8087
+    - protocol: TCP
+      port: 8088
+    - protocol: TCP
+      port: 8089
+    - protocol: TCP
+      port: 8090
+    - protocol: TCP
+      port: 8091
+  # DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# ========================================
+# 📊 OBSERVABILIDADE - NETWORK POLICY
+# ========================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: conexao-de-sorte-backend-observabilidade-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: conexao-de-sorte-backend-observabilidade
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Permitir coleta de métricas de todos os pods
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: conexao-de-sorte
+    ports:
+    - protocol: TCP
+      port: 8090
+  # Permitir acesso do Prometheus
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 8090
+  egress:
+  # Permitir coleta de métricas de todos os microsserviços
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: conexao-de-sorte
+    ports:
+    - protocol: TCP
+      port: 8081  # Management port padrão
+  # Acesso ao banco para métricas
+  - to:
+    - podSelector:
+        matchLabels:
+          app: conexao-mysql
+    ports:
+    - protocol: TCP
+      port: 3306
+  # DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
